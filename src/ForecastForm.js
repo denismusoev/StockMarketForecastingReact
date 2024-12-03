@@ -208,7 +208,8 @@ const ForecastForm = () => {
                             <ListGroup>
                                 {predictions.map((prediction, index) => (
                                     <ListGroup.Item key={index}>
-                                        {prediction.date}: {prediction.predicted_close_price}$
+                                        {prediction.date}: {prediction.predicted_close_price}
+                                        {type === 'forex' ? ` ${toSymbol} за 1 ${fromSymbol}` : '$'}
                                     </ListGroup.Item>
                                 ))}
                             </ListGroup>
