@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Container, Row, Col, Form, Button, Alert, ListGroup, Card } from 'react-bootstrap';
 import { Line } from 'react-chartjs-2'; // Импортируем компонент для графика
@@ -8,37 +8,73 @@ import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
 const ForecastForm = () => {
-    const [symbol, setSymbol] = useState('');
+    // Предопределенные значения
+    const stockSymbols = ['IBM', 'AAPL', 'GOOGL', 'MSFT'];
+    const cryptoCurrencies = {
+        BTC: ['USD'],
+        ETH: ['USD'],
+        XRP: ['USD'],
+        LTC: ['USD']
+    };
+    const forexCurrencies = {
+        EUR: ['USD', 'RUB'],
+        UAH: ['RUB'],
+        CNY: ['RUB', 'USD'],
+        GBP: ['USD']
+    };
+
     const [type, setType] = useState('stock');
-    const [market, setMarket] = useState(''); // Для криптовалюты
-    const [fromSymbol, setFromSymbol] = useState(''); // Для forex
-    const [toSymbol, setToSymbol] = useState(''); // Для forex
-    const [forecastCount, setForecastCount] = useState(1); // Количество дней для прогноза
+    const [symbol, setSymbol] = useState('IBM');
+    const [baseCurrency, setBaseCurrency] = useState();
+    const [targetCurrency, setTargetCurrency] = useState();
+    const [forecastCount, setForecastCount] = useState(1);
+    const [model, setModel] = useState('lstm');
     const [predictions, setPredictions] = useState([]);
+    const [predictedTest, setPredictedTest] = useState([]); // Добавлено
+    const [historicalData, setHistoricalData] = useState([]); // Добавлено
     const [result, setResult] = useState("");
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [rmse, setRmse] = useState(null);
+    const [mae, setMae] = useState(null);
 
-    // Обработчик отправки формы
+    useEffect(() => {
+        if (type === 'crypto') {
+            setBaseCurrency('BTC');
+            setTargetCurrency(cryptoCurrencies['BTC'][0]);
+        } else if (type === 'forex') {
+            setBaseCurrency('EUR');
+            setTargetCurrency(forexCurrencies['EUR'][0]);
+        } else if (type === 'stock') {
+            setSymbol(stockSymbols[0]);
+        }
+    }, [type]);
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
         setError('');
+        setRmse(null);
+        setMae(null);
 
         const requestData = {
             type,
-            symbol: type === 'forex' ? `${fromSymbol}/${toSymbol}` : symbol,
-            market: type === 'crypto' ? market : null,
-            fromSymbol: type === 'forex' ? fromSymbol : null,
-            toSymbol: type === 'forex' ? toSymbol : null,
-            dayCount: forecastCount, // Количество дней для прогноза
+            symbol: type === 'stock' ? symbol : type === "crypto" ? baseCurrency : null,
+            market: type === 'crypto' ? targetCurrency : null,
+            fromSymbol: type === 'forex' ? baseCurrency : null,
+            toSymbol: type === 'forex' ? targetCurrency : null,
+            dayCount: forecastCount,
+            model,
         };
 
         try {
-            // Отправка запроса на сервер Spring Boot
             const response = await axios.post('http://localhost:8080/api/predictions', requestData);
             setPredictions(response.data.predictions);
-            setResult(response.data.result);
+            setPredictedTest(response.data.predicted_test); // Устанавливаем предсказанные тестовые данные
+            setHistoricalData(response.data.historical_data); // Устанавливаем исторические данные
+            setRmse(response.data.rmse);
+            setMae(response.data.mae);
+            setResult(response.data.result || '');
             setError('');
         } catch (err) {
             console.error(err);
@@ -48,38 +84,74 @@ const ForecastForm = () => {
         }
     };
 
+    const historicalChartData = {
+        labels: historicalData.map((data) => data.recordDate), // Даты исторических данных
+        datasets: [
+            {
+                label: 'Исторические данные',
+                data: historicalData.map((data) => data.closePrice),
+                borderColor: 'rgba(75,192,192,1)',
+                backgroundColor: 'rgba(75,192,192,0.2)',
+                fill: false,
+            },
+            {
+                label: 'Прогноз на тестовых данных',
+                data: predictedTest.map((data) => data.predicted),
+                borderColor: 'rgba(192,75,75,1)',
+                backgroundColor: 'rgba(192,75,75,0.2)',
+                fill: false,
+            },
+        ],
+    };
+
+    const historicalChartOptions = {
+        responsive: true,
+        plugins: {
+            title: {
+                display: true,
+                text: 'Исторические данные и прогноз на тесте',
+            },
+        },
+        scales: {
+            x: {
+                title: {
+                    display: true,
+                    text: 'Дата',
+                },
+            },
+            y: {
+                title: {
+                    display: true,
+                    text: 'Цена',
+                },
+            },
+        },
+    };
+
     const getPriceRange = (predictions) => {
         const prices = predictions.map(pred => pred.predicted_close_price);
         const minPrice = Math.min(...prices);
         const maxPrice = Math.max(...prices);
+        const buffer = (maxPrice - minPrice) * 0.05;
 
-        // Добавляем небольшой запас сверху и снизу
-        const range = maxPrice - minPrice;
-        const buffer = range * 0.05; // 5% запаса
-
-        return {
-            min: minPrice - buffer,
-            max: maxPrice + buffer,
-        };
+        return { min: minPrice - buffer, max: maxPrice + buffer };
     };
 
     const chartData = {
-        labels: predictions.map(pred => pred.date), // Даты прогнозов
+        labels: predictions.map(pred => pred.date),
         datasets: [
             {
                 label: 'Прогнозируемая цена закрытия',
-                data: predictions.map(pred => pred.predicted_close_price), // Прогнозируемые цены
-                borderColor: 'rgba(75,192,192,1)', // Цвет линии
-                backgroundColor: 'rgba(75,192,192,0.2)', // Цвет фона
+                data: predictions.map(pred => pred.predicted_close_price),
+                borderColor: 'rgba(75,192,192,1)',
+                backgroundColor: 'rgba(75,192,192,0.2)',
                 fill: true,
             },
         ],
     };
 
-// Получаем динамический диапазон для оси Y
     const { min, max } = getPriceRange(predictions);
 
-// Конфигурация графика с динамическим диапазоном оси Y
     const chartOptions = {
         responsive: true,
         plugins: {
@@ -90,10 +162,10 @@ const ForecastForm = () => {
         },
         scales: {
             y: {
-                min, // Минимальное значение для оси Y
-                max, // Максимальное значение для оси Y
+                min,
+                max,
                 ticks: {
-                    stepSize: (max - min) / 5, // Шаг делений оси Y
+                    stepSize: (max - min) / 5,
                 },
             },
         },
@@ -102,9 +174,8 @@ const ForecastForm = () => {
     return (
         <Container className="mt-5">
             <Row>
-                {/* Левая колонка для ввода данных и таблицы */}
                 <Col md={6}>
-                    <h2>Прогноз для {symbol}</h2>
+                    <h2>Прогнозирование</h2>
                     <Card className="mb-4">
                         <Card.Body>
                             <Form onSubmit={handleSubmit}>
@@ -113,75 +184,75 @@ const ForecastForm = () => {
                                     <Form.Control as="select" value={type} onChange={(e) => setType(e.target.value)}>
                                         <option value="stock">Акции</option>
                                         <option value="crypto">Криптовалюта</option>
-                                        <option value="forex">Forex</option>
+                                        <option value="forex">Валютные пары</option>
                                     </Form.Control>
                                 </Form.Group>
 
-                                {/* Поле для символа акций */}
                                 {type === 'stock' && (
-                                    <Form.Group>
+                                    <Form.Group className="mt-3">
                                         <Form.Label>Символ:</Form.Label>
                                         <Form.Control
-                                            type="text"
+                                            as="select"
                                             value={symbol}
                                             onChange={(e) => setSymbol(e.target.value)}
-                                            required
-                                        />
+                                        >
+                                            {stockSymbols.map((stock) => (
+                                                <option key={stock} value={stock}>
+                                                    {stock}
+                                                </option>
+                                            ))}
+                                        </Form.Control>
                                     </Form.Group>
                                 )}
 
-                                {/* Поля для криптовалюты */}
-                                {type === 'crypto' && (
+                                {(type === 'crypto' || type === 'forex') && (
                                     <>
-                                        <Form.Group>
-                                            <Form.Label>Символ:</Form.Label>
+                                        <Form.Group className="mt-3">
+                                            <Form.Label>Базовая валюта:</Form.Label>
                                             <Form.Control
-                                                type="text"
-                                                value={symbol}
-                                                onChange={(e) => setSymbol(e.target.value)}
-                                                required
-                                            />
+                                                as="select"
+                                                value={baseCurrency}
+                                                onChange={(e) => setBaseCurrency(e.target.value)}
+                                            >
+                                                {Object.keys(type === 'crypto' ? cryptoCurrencies : forexCurrencies).map(
+                                                    (currency) => (
+                                                        <option key={currency} value={currency}>
+                                                            {currency}
+                                                        </option>
+                                                    )
+                                                )}
+                                            </Form.Control>
                                         </Form.Group>
 
-                                        <Form.Group>
-                                            <Form.Label>Тип валюты:</Form.Label>
-                                            <Form.Control
-                                                type="text"
-                                                value={market}
-                                                onChange={(e) => setMarket(e.target.value)}
-                                                required
-                                            />
-                                        </Form.Group>
-                                    </>
-                                )}
-
-                                {/* Поля для forex */}
-                                {type === 'forex' && (
-                                    <>
-                                        <Form.Group>
-                                            <Form.Label>Исходная валюта:</Form.Label>
-                                            <Form.Control
-                                                type="text"
-                                                value={fromSymbol}
-                                                onChange={(e) => setFromSymbol(e.target.value)}
-                                                required
-                                            />
-                                        </Form.Group>
-
-                                        <Form.Group>
+                                        <Form.Group className="mt-3">
                                             <Form.Label>Целевая валюта:</Form.Label>
                                             <Form.Control
-                                                type="text"
-                                                value={toSymbol}
-                                                onChange={(e) => setToSymbol(e.target.value)}
-                                                required
-                                            />
+                                                as="select"
+                                                value={targetCurrency}
+                                                onChange={(e) => setTargetCurrency(e.target.value)}
+                                            >
+                                                {(type === 'crypto'
+                                                        ? cryptoCurrencies[baseCurrency] || []
+                                                        : forexCurrencies[baseCurrency] || []
+                                                ).map((currency) => (
+                                                    <option key={currency} value={currency}>
+                                                        {currency}
+                                                    </option>
+                                                ))}
+                                            </Form.Control>
                                         </Form.Group>
                                     </>
                                 )}
 
-                                {/* Поле для количества прогнозов (ограничение до 14) */}
-                                <Form.Group>
+                                <Form.Group className="mt-3">
+                                    <Form.Label>Модель прогнозирования:</Form.Label>
+                                    <Form.Control as="select" value={model} onChange={(e) => setModel(e.target.value)}>
+                                        <option value="lstm">LSTM</option>
+                                        <option value="linear_regression">Линейная регрессия</option>
+                                    </Form.Control>
+                                </Form.Group>
+
+                                <Form.Group className="mt-3">
                                     <Form.Label>Количество прогнозов (не более 14):</Form.Label>
                                     <Form.Control
                                         type="number"
@@ -193,7 +264,7 @@ const ForecastForm = () => {
                                     />
                                 </Form.Group>
 
-                                <Button variant="primary" type="submit" disabled={loading}>
+                                <Button variant="primary" type="submit" disabled={loading} className="mt-3">
                                     {loading ? 'Загрузка...' : 'Получить прогноз'}
                                 </Button>
                             </Form>
@@ -202,6 +273,14 @@ const ForecastForm = () => {
 
                     {error && <Alert variant="danger" className="mt-3">{error}</Alert>}
 
+                    {rmse !== null && mae !== null && (
+                        <div className="mt-4">
+                            <h3>Оценка точности:</h3>
+                            <p><strong>RMSE:</strong> {rmse}</p>
+                            <p><strong>MAE:</strong> {mae}</p>
+                        </div>
+                    )}
+
                     {predictions.length > 0 && (
                         <div className="mt-4">
                             <h3>Прогнозы:</h3>
@@ -209,22 +288,27 @@ const ForecastForm = () => {
                                 {predictions.map((prediction, index) => (
                                     <ListGroup.Item key={index}>
                                         {prediction.date}: {prediction.predicted_close_price}
-                                        {type === 'forex' ? ` ${toSymbol} за 1 ${fromSymbol}` : '$'}
                                     </ListGroup.Item>
                                 ))}
                             </ListGroup>
                         </div>
                     )}
                 </Col>
-
-                {/* Правая колонка для графика */}
                 <Col md={6}>
-                    {result}
                     {predictions.length > 0 && (
-                        <Card>
+                        <Card className="mb-4">
                             <Card.Body>
                                 <h3>График прогноза:</h3>
                                 <Line data={chartData} options={chartOptions} />
+                            </Card.Body>
+                        </Card>
+                    )}
+
+                    {historicalData.length > 0 && predictedTest.length > 0 && (
+                        <Card>
+                            <Card.Body>
+                                <h3>Исторические данные и прогноз:</h3>
+                                <Line data={historicalChartData} options={historicalChartOptions} />
                             </Card.Body>
                         </Card>
                     )}
