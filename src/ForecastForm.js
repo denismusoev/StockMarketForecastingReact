@@ -50,6 +50,15 @@ const ForecastForm = () => {
         }
     }, [type]);
 
+    useEffect(() => {
+        if (type === 'crypto') {
+            setTargetCurrency(cryptoCurrencies[baseCurrency]?.[0] || ''); // Устанавливаем первую доступную целевую валюту
+        } else if (type === 'forex') {
+            setTargetCurrency(forexCurrencies[baseCurrency]?.[0] || ''); // Устанавливаем первую доступную целевую валюту
+        }
+    }, [baseCurrency, type]);
+
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
@@ -67,6 +76,9 @@ const ForecastForm = () => {
             model,
         };
 
+        console.log(type === "forex")
+        console.log(targetCurrency);
+
         try {
             const response = await axios.post('http://localhost:8080/api/predictions', requestData);
             setPredictions(response.data.predictions);
@@ -76,6 +88,7 @@ const ForecastForm = () => {
             setMae(response.data.mae);
             setResult(response.data.result || '');
             setError('');
+            console.log(response.data);
         } catch (err) {
             console.error(err);
             setError('Ошибка при получении прогноза');
@@ -212,7 +225,11 @@ const ForecastForm = () => {
                                             <Form.Control
                                                 as="select"
                                                 value={baseCurrency}
-                                                onChange={(e) => setBaseCurrency(e.target.value)}
+                                                onChange={(e) => {
+                                                    setBaseCurrency(e.target.value)
+                                                    console.log(e.target.value);
+                                                }
+                                            }
                                             >
                                                 {Object.keys(type === 'crypto' ? cryptoCurrencies : forexCurrencies).map(
                                                     (currency) => (
@@ -229,7 +246,14 @@ const ForecastForm = () => {
                                             <Form.Control
                                                 as="select"
                                                 value={targetCurrency}
-                                                onChange={(e) => setTargetCurrency(e.target.value)}
+                                                onClick={(e) => {
+                                                    console.log("Элемент выбран:", e.target.value); // Вывод в консоль выбранного элемента
+                                                }}
+                                                onChange={(e) => {
+                                                    setTargetCurrency(e.target.value)
+                                                    console.log(e.target.value);
+                                                }
+                                                }
                                             >
                                                 {(type === 'crypto'
                                                         ? cryptoCurrencies[baseCurrency] || []
